@@ -8,6 +8,7 @@ Read from the Django ``PYOBS_AUTH`` setting, e.g.::
         "CLIENT_ID": "archive",
         "CLIENT_SECRET": os.getenv("KEYCLOAK_CLIENT_SECRET"),
         "REDIRECT_URI": "https://archive.example.org/accounts/keycloak/callback/",
+        "POST_LOGOUT_REDIRECT_URI": "https://archive.example.org/",
         # dotted path to a callable(claims: dict) -> django.contrib.auth.models.User
         "USER_RESOLVER": "pyobs_archive.authentication.keycloak.resolve_user",
     }
@@ -29,6 +30,7 @@ class KeycloakSettings:
     client_secret: str | None = None
     audience: str | None = None
     redirect_uri: str | None = None
+    post_logout_redirect_uri: str | None = None
     scopes: tuple[str, ...] = field(default_factory=lambda: ("openid", "profile", "email"))
     user_resolver: str | None = None
 
@@ -80,6 +82,7 @@ def get_settings() -> KeycloakSettings:
         client_secret=raw.get("CLIENT_SECRET"),
         audience=raw.get("AUDIENCE"),
         redirect_uri=raw.get("REDIRECT_URI"),
+        post_logout_redirect_uri=raw.get("POST_LOGOUT_REDIRECT_URI"),
         scopes=tuple(raw.get("SCOPES", ("openid", "profile", "email"))),
         user_resolver=raw.get("USER_RESOLVER"),
     )

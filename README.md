@@ -18,7 +18,10 @@ brokered *behind* that Keycloak instance, not validated directly by this library
 - `pyobs_auth.authentication.KeycloakAuthentication` - a DRF `BaseAuthentication` class wiring
   the above into `REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']`.
 - `pyobs_auth.views`/`pyobs_auth.urls` - the browser-facing login redirect + callback views for
-  the PKCE flow (session-based).
+  the PKCE flow (session-based), plus a `LogoutView` that also ends the Keycloak SSO session via
+  RP-Initiated Logout - but only for sessions that came from Keycloak in the first place. A plain
+  local-password session just gets an ordinary local logout, so one "Log out" link/URL works
+  correctly either way without the caller needing to know how the user signed in.
 
 ## Configuration
 
@@ -36,6 +39,9 @@ PYOBS_AUTH = {
     "CLIENT_ID": "archive",
     "CLIENT_SECRET": os.getenv("KEYCLOAK_CLIENT_SECRET"),
     "REDIRECT_URI": "https://archive.example.org/accounts/keycloak/callback/",
+    # optional - only needed to use LogoutView's Keycloak SSO logout. Must be registered as a
+    # "Valid post logout redirect URI" for this client in Keycloak.
+    "POST_LOGOUT_REDIRECT_URI": "https://archive.example.org/",
     # dotted path to a callable(claims: dict) -> django.contrib.auth.models.User (or None)
     "USER_RESOLVER": "myapp.authentication.resolve_user",
 }
@@ -55,6 +61,16 @@ urlpatterns = [
     path("accounts/keycloak/", include("pyobs_auth.urls")),
     ...
 ]
+```
+
+Point your existing "Log out" link/form at `pyobs_auth:logout` instead of Django's built-in
+`logout` view - it's POST-only (matching Django's own CSRF-safe logout convention) and handles
+both kinds of session correctly:
+
+```html
+<form method="post" action="{% url 'pyobs_auth:logout' %}">{% csrf_token %}
+    <button type="submit">Log out</button>
+</form>
 ```
 
 ### `USER_RESOLVER`

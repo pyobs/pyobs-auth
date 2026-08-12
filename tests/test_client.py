@@ -5,7 +5,7 @@ import responses
 
 from pyobs_auth.client import KeycloakClient, TokenExchangeError
 
-from .helpers import AUTHORIZATION_ENDPOINT, TOKEN_ENDPOINT, register_discovery_and_jwks
+from .helpers import AUTHORIZATION_ENDPOINT, END_SESSION_ENDPOINT, TOKEN_ENDPOINT, register_discovery_and_jwks
 
 
 @responses.activate
@@ -92,3 +92,29 @@ def test_refresh(keycloak_settings, signing_keys, monkeypatch):
     sent = parse_qs(responses.calls[-1].request.body)
     assert sent["grant_type"] == ["refresh_token"]
     assert sent["refresh_token"] == ["old-rt"]
+
+
+@responses.activate
+def test_end_session_url_uses_configured_post_logout_redirect(keycloak_settings, signing_keys, monkeypatch):
+    from dataclasses import replace
+
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    settings = replace(keycloak_settings, post_logout_redirect_uri="https://archive.example.org/")
+
+    url = KeycloakClient(settings).end_session_url(id_token_hint="the-id-token")
+
+    parsed = urlparse(url)
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == END_SESSION_ENDPOINT
+    query = parse_qs(parsed.query)
+    assert query["id_token_hint"] == ["the-id-token"]
+    assert query["client_id"] == ["archive"]
+    assert query["post_logout_redirect_uri"] == ["https://archive.example.org/"]
+
+
+@responses.activate
+def test_end_session_url_omits_post_logout_redirect_when_unconfigured(keycloak_settings, signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+
+    url = KeycloakClient(keycloak_settings).end_session_url(id_token_hint="the-id-token")
+
+    assert "post_logout_redirect_uri" not in parse_qs(urlparse(url).query)

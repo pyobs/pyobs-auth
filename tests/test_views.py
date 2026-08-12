@@ -59,6 +59,24 @@ def test_full_login_flow(signing_keys, make_claims, monkeypatch):
 
 @responses.activate
 @pytest.mark.django_db
+def test_callback_rejects_inactive_user(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    User.objects.create(username="inactive-sub", is_active=False)
+    token = signing_keys.sign(make_claims(sub="inactive-sub"))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    login_response = client.get("/accounts/keycloak/login/")
+    state = parse_qs(urlparse(login_response.url).query)["state"][0]
+
+    response = client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    assert response.status_code == 400
+    assert "_auth_user_id" not in client.session
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_callback_rejects_mismatched_state(signing_keys, monkeypatch):
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     client = Client()

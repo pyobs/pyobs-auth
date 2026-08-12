@@ -73,6 +73,9 @@ def test_callback_rejects_inactive_user(signing_keys, make_claims, monkeypatch):
 
     assert response.status_code == 400
     assert "_auth_user_id" not in client.session
+    # a styled error page, not a bare-text 400 - see pyobs_auth/templates/pyobs_auth/error.html
+    assert b"pending activation" in response.content
+    assert b'href="/"' in response.content
 
 
 @responses.activate

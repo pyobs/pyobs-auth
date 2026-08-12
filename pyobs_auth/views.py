@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from django.conf import settings as django_settings
 from django.contrib.auth import login, logout
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.shortcuts import render
 from django.views import View
 
 from .client import KeycloakClient, TokenExchangeError
@@ -22,6 +23,14 @@ SESSION_NEXT_KEY = "pyobs_auth_next"
 # Presence of this key is also how LogoutView tells "this session came from Keycloak" apart from
 # a plain local-password session, so it knows whether to also end the Keycloak SSO session.
 SESSION_ID_TOKEN_KEY = "pyobs_auth_id_token"
+
+
+def _error_response(request: HttpRequest, message: str) -> HttpResponse:
+    """A styled error page rather than a bare 400 - pyobs_auth doesn't know the host app's own
+    login URL name (each service names it differently), so this always links back to "/", which
+    every consuming service already bounces an unauthenticated visitor to its own login page
+    from."""
+    return render(request, "pyobs_auth/error.html", {"message": message, "back_url": "/"}, status=400)
 
 
 class LoginView(View):
@@ -43,7 +52,7 @@ class CallbackView(View):
     def get(self, request: HttpRequest) -> HttpResponse:
         error = request.GET.get("error")
         if error:
-            return HttpResponseBadRequest(f"Keycloak login failed: {error}")
+            return _error_response(request, f"Keycloak login failed: {error}")
 
         code = request.GET.get("code")
         state = request.GET.get("state")
@@ -52,7 +61,7 @@ class CallbackView(View):
         next_url = request.session.pop(SESSION_NEXT_KEY, "/") or "/"
 
         if not code or not state or not code_verifier or state != expected_state:
-            return HttpResponseBadRequest("Invalid or expired login state")
+            return _error_response(request, "Invalid or expired login state")
 
         settings = get_settings()
         client = KeycloakClient(settings)
@@ -60,24 +69,24 @@ class CallbackView(View):
         try:
             tokens = client.exchange_code(code=code, code_verifier=code_verifier)
         except TokenExchangeError as exc:
-            return HttpResponseBadRequest(f"Token exchange failed: {exc}")
+            return _error_response(request, f"Token exchange failed: {exc}")
 
         access_token = tokens.get("access_token")
         if not access_token:
-            return HttpResponseBadRequest("No access_token in Keycloak's response")
+            return _error_response(request, "No access_token in Keycloak's response")
 
         validator = TokenValidator(settings)
         try:
             claims = validator.validate(access_token)
         except TokenValidationError as exc:
-            return HttpResponseBadRequest(f"Received an invalid token: {exc}")
+            return _error_response(request, f"Received an invalid token: {exc}")
 
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
-            return HttpResponseBadRequest("No local user for this token")
+            return _error_response(request, "No local user for this token")
         if not user.is_active:
-            return HttpResponseBadRequest("Account pending activation")
+            return _error_response(request, "This account is pending activation. Contact an administrator.")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
         login(request, user, backend=backend)

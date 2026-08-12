@@ -62,7 +62,8 @@ def test_unverified_issuer_does_not_require_network(keycloak_settings, signing_k
     token = signing_keys.sign(make_claims(iss="https://someone-elses-keycloak.example.org/realms/x"))
 
     assert (
-        TokenValidator(keycloak_settings).unverified_issuer(token) == "https://someone-elses-keycloak.example.org/realms/x"
+        TokenValidator(keycloak_settings).unverified_issuer(token)
+        == "https://someone-elses-keycloak.example.org/realms/x"
     )
 
 

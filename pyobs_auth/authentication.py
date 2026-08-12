@@ -8,6 +8,11 @@ issuer.
 
 This class is written to be safe to stack alongside another Bearer-scheme authenticator that
 can't be modified (e.g. an existing legacy OAuth2 BearerAuthentication) - see below.
+
+A resolved user with `is_active=False` is refused - USER_RESOLVER implementations mint new
+accounts inactive by convention, giving each service an independent local activation gate on top
+of whatever access control Keycloak itself does (a kill switch that doesn't depend on Keycloak
+realm/client config alone).
 """
 
 from __future__ import annotations
@@ -50,6 +55,8 @@ class KeycloakAuthentication(authentication.BaseAuthentication):
         user = user_resolver(claims)
         if user is None:
             raise exceptions.AuthenticationFailed("No local user for this token")
+        if not user.is_active:
+            raise exceptions.AuthenticationFailed("Account pending activation")
 
         return (user, claims)
 

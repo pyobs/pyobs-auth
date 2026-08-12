@@ -76,6 +76,8 @@ class CallbackView(View):
         user = user_resolver(claims)
         if user is None:
             return HttpResponseBadRequest("No local user for this token")
+        if not user.is_active:
+            return HttpResponseBadRequest("Account pending activation")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
         login(request, user, backend=backend)

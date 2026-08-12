@@ -57,6 +57,18 @@ def test_authenticate_defers_for_a_token_from_another_issuer(signing_keys, make_
 
 @responses.activate
 @pytest.mark.django_db
+def test_authenticate_raises_for_inactive_user(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    User.objects.create(username="inactive-sub", is_active=False)
+    token = signing_keys.sign(make_claims(sub="inactive-sub"))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with pytest.raises(AuthenticationFailed):
+        KeycloakAuthentication().authenticate(request)
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_authenticate_raises_on_invalid_token(signing_keys, make_claims, monkeypatch):
     from .helpers import generate_signing_keys
 

@@ -29,7 +29,9 @@ class LoginView(View):
 
         request.session[SESSION_STATE_KEY] = authorization.state
         request.session[SESSION_CODE_VERIFIER_KEY] = authorization.code_verifier
-        request.session[SESSION_NEXT_KEY] = request.GET.get("next", "/")
+        # `or "/"` (not just a dict default) because `?next=` with an empty value is a present-but-
+        # falsy key - `.get("next", "/")` alone would return "" instead of falling back to "/".
+        request.session[SESSION_NEXT_KEY] = request.GET.get("next") or "/"
 
         return HttpResponseRedirect(authorization.url)
 
@@ -44,7 +46,7 @@ class CallbackView(View):
         state = request.GET.get("state")
         expected_state = request.session.pop(SESSION_STATE_KEY, None)
         code_verifier = request.session.pop(SESSION_CODE_VERIFIER_KEY, None)
-        next_url = request.session.pop(SESSION_NEXT_KEY, "/")
+        next_url = request.session.pop(SESSION_NEXT_KEY, "/") or "/"
 
         if not code or not state or not code_verifier or state != expected_state:
             return HttpResponseBadRequest("Invalid or expired login state")

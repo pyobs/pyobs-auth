@@ -26,6 +26,19 @@ def test_login_view_redirects_to_keycloak_and_stores_session_state(signing_keys,
 
 @responses.activate
 @pytest.mark.django_db
+def test_login_view_defaults_next_to_root_when_missing_or_empty(signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    client = Client()
+
+    client.get("/accounts/keycloak/login/")
+    assert client.session["pyobs_auth_next"] == "/"
+
+    client.get("/accounts/keycloak/login/?next=")
+    assert client.session["pyobs_auth_next"] == "/"
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_full_login_flow(signing_keys, make_claims, monkeypatch):
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     token = signing_keys.sign(make_claims(sub="keycloak-sub-42"))

@@ -13,6 +13,7 @@ DISCOVERY_URL = f"{ISSUER}/.well-known/openid-configuration"
 AUTHORIZATION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/auth"
 TOKEN_ENDPOINT = f"{ISSUER}/protocol/openid-connect/token"
 USERINFO_ENDPOINT = f"{ISSUER}/protocol/openid-connect/userinfo"
+END_SESSION_ENDPOINT = f"{ISSUER}/protocol/openid-connect/logout"
 JWKS_URI = f"{ISSUER}/protocol/openid-connect/certs"
 KID = "test-key-1"
 
@@ -52,6 +53,7 @@ def register_discovery_and_jwks(mock: responses.RequestsMock, keys: SigningKeys,
             "authorization_endpoint": AUTHORIZATION_ENDPOINT,
             "token_endpoint": TOKEN_ENDPOINT,
             "userinfo_endpoint": USERINFO_ENDPOINT,
+            "end_session_endpoint": END_SESSION_ENDPOINT,
             "jwks_uri": JWKS_URI,
         },
     )

@@ -548,7 +548,7 @@ crypto = [
 
 [[package]]
 name = "pyobs-auth"
-version = "2.0.0.dev3"
+version = "2.0.0.dev4"
 source = { editable = "." }
 dependencies = [
     { name = "django" },

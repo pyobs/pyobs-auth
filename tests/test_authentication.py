@@ -45,6 +45,18 @@ def test_authenticate_raises_on_malformed_header():
 
 @responses.activate
 @pytest.mark.django_db
+def test_authenticate_defers_for_a_token_from_another_issuer(signing_keys, make_claims, monkeypatch):
+    """A well-formed Bearer token that just isn't ours must return None, not raise - so a
+    second, unmodifiable Bearer-scheme authenticator stacked after this one still gets a turn."""
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(iss="https://someone-elses-keycloak.example.org/realms/x"))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    assert KeycloakAuthentication().authenticate(request) is None
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_authenticate_raises_on_invalid_token(signing_keys, make_claims, monkeypatch):
     from .helpers import generate_signing_keys
 

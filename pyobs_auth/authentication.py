@@ -5,6 +5,9 @@ support here. See pyobs-core's shared-auth design doc for why: any upstream iden
 (including a self-hosted observation-portal) is meant to be brokered *behind* Keycloak, not
 validated directly by this class, so archive/robotic-backend/etc. only ever need to trust one
 issuer.
+
+This class is written to be safe to stack alongside another Bearer-scheme authenticator that
+can't be modified (e.g. an existing legacy OAuth2 BearerAuthentication) - see below.
 """
 
 from __future__ import annotations
@@ -28,6 +31,15 @@ class KeycloakAuthentication(authentication.BaseAuthentication):
         token = auth_header[1].decode()
         settings = get_settings()
         validator = TokenValidator(settings)
+
+        # DRF stops the whole authenticator chain on a raise, unlike a `None` return, which just
+        # falls through to the next class. If another Bearer-scheme authenticator is also
+        # registered (e.g. a legacy OAuth2 BearerAuthentication that can't be modified to do the
+        # same check), a token that was never meant for us must not block it from getting a turn -
+        # so defer (return None) for anything that doesn't even claim to be from our issuer, and
+        # only raise once we know the token was meant for us but is actually invalid.
+        if validator.unverified_issuer(token) != settings.issuer:
+            return None
 
         try:
             claims = validator.validate(token)

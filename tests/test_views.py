@@ -2,8 +2,9 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 import responses
+from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import Client
+from django.test import Client, override_settings
 
 from .helpers import END_SESSION_ENDPOINT, TOKEN_ENDPOINT, register_discovery_and_jwks
 
@@ -150,3 +151,45 @@ def test_logout_only_accepts_post():
     client = Client()
     response = client.get("/accounts/keycloak/logout/")
     assert response.status_code == 405
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_login_view_uses_configured_idp_hint(signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    client = Client()
+
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "IDP_HINT": "gwdg"}):
+        response = client.get("/accounts/keycloak/login/?next=/dashboard/")
+
+    assert response.status_code == 302
+    query = parse_qs(urlparse(response.url).query)
+    assert query["kc_idp_hint"] == ["gwdg"]
+    assert client.session["pyobs_auth_next"] == "/dashboard/"
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_login_view_empty_idp_hint_param_suppresses_the_hint(signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    client = Client()
+
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "IDP_HINT": "gwdg"}):
+        response = client.get("/accounts/keycloak/login/?idp_hint=&next=/dashboard/")
+
+    assert response.status_code == 302
+    assert "kc_idp_hint" not in parse_qs(urlparse(response.url).query)
+    assert client.session["pyobs_auth_next"] == "/dashboard/"
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_login_view_explicit_idp_hint_param_overrides_the_configured_default(signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    client = Client()
+
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "IDP_HINT": "gwdg"}):
+        response = client.get("/accounts/keycloak/login/?idp_hint=other-idp&next=/dashboard/")
+
+    assert response.status_code == 302
+    assert parse_qs(urlparse(response.url).query)["kc_idp_hint"] == ["other-idp"]

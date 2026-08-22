@@ -118,3 +118,21 @@ def test_end_session_url_omits_post_logout_redirect_when_unconfigured(keycloak_s
     url = KeycloakClient(keycloak_settings).end_session_url(id_token_hint="the-id-token")
 
     assert "post_logout_redirect_uri" not in parse_qs(urlparse(url).query)
+
+
+@responses.activate
+def test_start_authorization_with_idp_hint(keycloak_settings, signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+
+    result = KeycloakClient(keycloak_settings).start_authorization(idp_hint="gwdg")
+
+    assert parse_qs(urlparse(result.url).query)["kc_idp_hint"] == ["gwdg"]
+
+
+@responses.activate
+def test_start_authorization_omits_idp_hint_when_absent(keycloak_settings, signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+
+    result = KeycloakClient(keycloak_settings).start_authorization()
+
+    assert "kc_idp_hint" not in parse_qs(urlparse(result.url).query)

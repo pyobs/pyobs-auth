@@ -33,6 +33,7 @@ class KeycloakSettings:
     post_logout_redirect_uri: str | None = None
     scopes: tuple[str, ...] = field(default_factory=lambda: ("openid", "profile", "email"))
     user_resolver: str | None = None
+    idp_hint: str | None = None
 
     @property
     def issuer(self) -> str:
@@ -85,4 +86,5 @@ def get_settings() -> KeycloakSettings:
         post_logout_redirect_uri=raw.get("POST_LOGOUT_REDIRECT_URI"),
         scopes=tuple(raw.get("SCOPES", ("openid", "profile", "email"))),
         user_resolver=raw.get("USER_RESOLVER"),
+        idp_hint=raw.get("IDP_HINT"),
     )

@@ -44,6 +44,10 @@ PYOBS_AUTH = {
     "POST_LOGOUT_REDIRECT_URI": "https://archive.example.org/",
     # dotted path to a callable(claims: dict) -> django.contrib.auth.models.User (or None)
     "USER_RESOLVER": "myapp.authentication.resolve_user",
+    # optional - passed to Keycloak's authorization endpoint as kc_idp_hint, skipping its
+    # login/IdP-selection page and going straight to that identity provider (e.g. an institute
+    # SSO). The alias is deployment-specific to your realm.
+    "IDP_HINT": "gwdg",
 }
 
 REST_FRAMEWORK = {
@@ -62,6 +66,11 @@ urlpatterns = [
     ...
 ]
 ```
+
+The login view also accepts an optional `?idp_hint=` query param that overrides `IDP_HINT` per
+request: `?idp_hint=` (present but empty) disables the hint for that login (a "log in with local
+Keycloak account" button), and `?idp_hint=<alias>` uses that alias. When the param is absent, the
+configured `IDP_HINT` default applies.
 
 Point your existing "Log out" link/form at `pyobs_auth:logout` instead of Django's built-in
 `logout` view - it's POST-only (matching Django's own CSRF-safe logout convention) and handles

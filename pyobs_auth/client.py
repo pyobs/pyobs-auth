@@ -42,7 +42,9 @@ class KeycloakClient:
     def _discovery(self):
         return fetch_discovery_document(self._settings.discovery_url)
 
-    def start_authorization(self, *, redirect_uri: str | None = None) -> AuthorizationRequest:
+    def start_authorization(
+        self, *, idp_hint: str | None = None, redirect_uri: str | None = None
+    ) -> AuthorizationRequest:
         """Build the redirect URL for the authorization-code + PKCE login flow."""
         document = self._discovery()
         state = _b64url(secrets.token_bytes(24))
@@ -62,6 +64,10 @@ class KeycloakClient:
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
         }
+        if idp_hint:
+            # kc_idp_hint: Keycloak skips its login/IdP-selection page and redirects straight to
+            # that identity provider; unknown aliases fall back to the normal login page.
+            params["kc_idp_hint"] = idp_hint
         url = f"{document.authorization_endpoint}?{urlencode(params)}"
         return AuthorizationRequest(url=url, state=state, code_verifier=code_verifier)
 

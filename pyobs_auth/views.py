@@ -37,7 +37,12 @@ class LoginView(View):
     def get(self, request: HttpRequest) -> HttpResponse:
         settings = get_settings()
         client = KeycloakClient(settings)
-        authorization = client.start_authorization()
+        # ?idp_hint= handling: absent -> the configured default hint (fast path); present but
+        # empty -> no hint (local Keycloak account); any value -> that specific hint.
+        idp_hint = request.GET.get("idp_hint")
+        if idp_hint is None:
+            idp_hint = settings.idp_hint
+        authorization = client.start_authorization(idp_hint=idp_hint or None)
 
         request.session[SESSION_STATE_KEY] = authorization.state
         request.session[SESSION_CODE_VERIFIER_KEY] = authorization.code_verifier

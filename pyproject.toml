@@ -22,6 +22,8 @@ dev = [
     "pyrefly>=1.1.1",
     "responses>=0.25.0,<1",
     "types-requests>=2.32.0.20250328,<3",
+    "Sphinx",
+    "sphinx-rtd-theme",
 ]
 
 [tool.hatch.build.targets.sdist]

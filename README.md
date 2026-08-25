@@ -1,7 +1,7 @@
 # pyobs-auth
 
 Shared Keycloak/OIDC authentication client for pyobs web services (`pyobs-archive`,
-`pyobs-robotic-backend`, and future services), so each one doesn't reimplement OIDC discovery,
+`pyobs-portal`, and future services), so each one doesn't reimplement OIDC discovery,
 token validation, and user mapping on its own.
 
 Single issuer only, by design: every service trusts exactly one Keycloak realm. Any upstream
@@ -86,7 +86,7 @@ both kinds of session correctly:
 
 pyobs-auth deliberately doesn't decide how a validated token maps to your app's local `User`
 model - each service's schema is different (e.g. `pyobs-archive`'s existing `Profile` model vs.
-`pyobs-robotic-backend`, which has none yet). Provide a callable that takes the validated JWT
+`pyobs-portal`, which has none yet). Provide a callable that takes the validated JWT
 claims and returns a `User` (or `None` to reject):
 
 ```python

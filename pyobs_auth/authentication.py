@@ -3,7 +3,7 @@
 Single issuer only (the one Keycloak realm in PYOBS_AUTH) - there is deliberately no multi-issuer
 support here. See pyobs-core's shared-auth design doc for why: any upstream identity provider
 (including a self-hosted observation-portal) is meant to be brokered *behind* Keycloak, not
-validated directly by this class, so archive/robotic-backend/etc. only ever need to trust one
+validated directly by this class, so archive/portal/etc. only ever need to trust one
 issuer.
 
 This class is written to be safe to stack alongside another Bearer-scheme authenticator that

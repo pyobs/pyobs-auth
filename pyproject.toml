@@ -1,6 +1,6 @@
 [project]
 name = "pyobs-auth"
-version = "2.0.0.dev9"
+version = "2.0.0.dev10"
 description = "Shared Keycloak/OIDC authentication client for pyobs web services"
 authors = [{ name = "Tim-Oliver Husser", email = "thusser@uni-goettingen.de" }]
 requires-python = ">=3.11"
@@ -22,6 +22,8 @@ dev = [
     "pyrefly>=1.1.1",
     "responses>=0.25.0,<1",
     "types-requests>=2.32.0.20250328,<3",
+    "Sphinx",
+    "sphinx-rtd-theme",
 ]
 
 [tool.hatch.build.targets.sdist]

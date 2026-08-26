@@ -3,11 +3,8 @@ Architecture
 
 *pyobs-auth* is a library, not a service — it's installed into other pyobs web apps
 (pyobs-archive, pyobs-portal, pyobs-web-admin) so they share one authentication implementation
-instead of each rolling their own against Keycloak. See pyobs-core's
-`specs/design/shared-auth-keycloak.md
-<https://github.com/pyobs/pyobs-core/blob/develop/specs/design/shared-auth-keycloak.md>`_ for the
-full design history and the problem this replaced (each service previously had its own
-uncoordinated auth backend).
+instead of each rolling their own against Keycloak, which is what each service did before this
+library existed.
 
 Single issuer, by design
 ***************************

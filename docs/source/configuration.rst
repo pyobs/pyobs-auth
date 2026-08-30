@@ -121,6 +121,22 @@ effect at the user's next login - bounded only by ``SESSION_COOKIE_AGE``, not by
 lifetime. This is not automatic - it must be added to each consuming service's ``MIDDLEWARE``
 explicitly.
 
+.. warning::
+   **Requires a server-side session engine.** ``CallbackView`` stores the Keycloak refresh token
+   in the session so this middleware can use it later - a bearer credential that can mint fresh
+   access tokens indefinitely. With ``SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"``,
+   that would serialize into the browser's cookie (signed, but not encrypted, and readable by the
+   client). ``CallbackView`` detects this and refuses to store the refresh token at all rather
+   than doing that - the session still works, it just never becomes refreshable, silently falling
+   back to "revocation takes effect at next login" for that deployment. Use a server-side engine
+   (``django.contrib.sessions.backends.db`` or ``cached_db``) to actually get the benefit of this
+   middleware.
+
+A failed refresh only ends the session when Keycloak's token endpoint reports the grant as
+genuinely invalid (``error: "invalid_grant"``) - a network failure or a 5xx from Keycloak itself
+leaves the session alone and lets the next request retry, rather than mass-logging-out every
+active session during a Keycloak outage.
+
 ``USER_RESOLVER``
 ******************
 

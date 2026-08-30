@@ -71,6 +71,25 @@ class ImproperlyConfiguredError(Exception):
     pass
 
 
+def _as_tuple(value: Any) -> tuple[str, ...]:
+    """A bare string (a common mistake for a "one group" REQUIRED_GROUPS/REQUIRED_ROLES value)
+    would otherwise silently `tuple()`-split into individual characters instead of raising -
+    normalize it to a one-element tuple instead."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
+
+
+def _as_bool(value: Any) -> bool:
+    """`bool("False")` is True - a string value (e.g. from naive env-var parsing) needs an
+    explicit check rather than Python's default truthiness."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 def get_settings() -> KeycloakSettings:
     """Build KeycloakSettings from Django's PYOBS_AUTH setting."""
     from django.conf import settings as django_settings
@@ -94,7 +113,7 @@ def get_settings() -> KeycloakSettings:
         scopes=tuple(raw.get("SCOPES", ("openid", "profile", "email"))),
         user_resolver=raw.get("USER_RESOLVER"),
         idp_hint=raw.get("IDP_HINT"),
-        required_groups=tuple(raw.get("REQUIRED_GROUPS", ())),
-        required_roles=tuple(raw.get("REQUIRED_ROLES", ())),
-        enforce_local_active=bool(raw.get("ENFORCE_LOCAL_ACTIVE", False)),
+        required_groups=_as_tuple(raw.get("REQUIRED_GROUPS")),
+        required_roles=_as_tuple(raw.get("REQUIRED_ROLES")),
+        enforce_local_active=_as_bool(raw.get("ENFORCE_LOCAL_ACTIVE", False)),
     )

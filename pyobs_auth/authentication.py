@@ -18,11 +18,15 @@ switch rather than the default gate.
 
 from __future__ import annotations
 
+import logging
+
 from rest_framework import authentication, exceptions
 
 from .authorization import AuthorizationError, authorize
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
+
+_logger = logging.getLogger(__name__)
 
 
 class KeycloakAuthentication(authentication.BaseAuthentication):
@@ -53,16 +57,22 @@ class KeycloakAuthentication(authentication.BaseAuthentication):
         except TokenValidationError as exc:
             raise exceptions.AuthenticationFailed(str(exc)) from exc
 
+        # Checked before resolving a local user - an unauthorized caller must not mint a User
+        # row just by presenting a validly-signed-but-ungrouped token.
+        try:
+            authorize(claims, settings)
+        except AuthorizationError as exc:
+            raise exceptions.AuthenticationFailed(str(exc)) from exc
+        except ValueError:
+            _logger.exception("PYOBS_AUTH['REQUIRED_ROLES'] is malformed")
+            raise
+
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
             raise exceptions.AuthenticationFailed("No local user for this token")
         if settings.enforce_local_active and not user.is_active:
             raise exceptions.AuthenticationFailed("Account pending activation")
-        try:
-            authorize(claims, settings)
-        except AuthorizationError as exc:
-            raise exceptions.AuthenticationFailed(str(exc)) from exc
 
         return (user, claims)
 

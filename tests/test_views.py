@@ -121,6 +121,60 @@ def test_callback_rejects_user_without_required_group(signing_keys, make_claims,
 
 @responses.activate
 @pytest.mark.django_db
+def test_callback_does_not_mint_a_user_when_required_group_missing(signing_keys, make_claims, monkeypatch):
+    """authorize() must run before USER_RESOLVER - an unauthorized caller shouldn't get a local
+    User row minted just by presenting a validly-signed-but-ungrouped token."""
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="never-minted-sub", groups=[]))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "REQUIRED_GROUPS": ["/pyobs-archive"]}):
+        login_response = client.get("/accounts/keycloak/login/")
+        state = parse_qs(urlparse(login_response.url).query)["state"][0]
+        client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    assert not User.objects.filter(username="never-minted-sub").exists()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_declines_to_store_refresh_token_with_signed_cookie_sessions(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="cookie-session-sub"))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token, "refresh_token": "should-not-be-stored"})
+
+    client = Client()
+    with override_settings(SESSION_ENGINE="django.contrib.sessions.backends.signed_cookies"):
+        login_response = client.get("/accounts/keycloak/login/")
+        state = parse_qs(urlparse(login_response.url).query)["state"][0]
+        response = client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    # login still succeeds - only the refresh-token storage is skipped
+    assert response.status_code == 302
+    assert "pyobs_auth_refresh_token" not in client.session
+    assert "pyobs_auth_access_expires" not in client.session
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_propagates_malformed_required_roles_loudly(signing_keys, make_claims, monkeypatch):
+    """A malformed REQUIRED_ROLES entry is a deployment config error, not user input - it must
+    surface loudly (ValueError, ultimately a 500), not be swallowed into a quiet refusal."""
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="whatever"))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "REQUIRED_ROLES": ["no-colon-here"]}):
+        login_response = client.get("/accounts/keycloak/login/")
+        state = parse_qs(urlparse(login_response.url).query)["state"][0]
+        with pytest.raises(ValueError, match="malformed"):
+            client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_callback_stores_refresh_token_and_access_expiry(signing_keys, make_claims, monkeypatch):
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     claims = make_claims(sub="keycloak-sub-1")

@@ -20,15 +20,27 @@ Add to `MIDDLEWARE`, after `AuthenticationMiddleware` (needs `request.user`)::
     ]
 
 A no-op for any request whose session doesn't carry both a refresh token and an access-token
-expiry - i.e. sessions never established via `CallbackView` (a local-password session) and
-sessions established before this middleware existed.
+expiry - i.e. sessions never established via `CallbackView` (a local-password session), sessions
+established before this middleware existed, and sessions where `CallbackView` declined to store
+the refresh token at all (a cookie-backed `SESSION_ENGINE` - see `views.py`).
+
+A failed refresh only ends the session when Keycloak's token endpoint says the grant is actually
+invalid (`error: "invalid_grant"`) - a network error or a 5xx from Keycloak itself leaves the
+session as-is and lets the next request retry, so a Keycloak outage doesn't mass-log-out every
+active session. `invalid_grant` itself is ambiguous between "genuinely revoked" and "a harmless
+race between two concurrent requests both refreshing the same soon-to-be-invalidated token" (only
+relevant if the realm has refresh-token rotation/revocation enabled) - handled by re-reading the
+session from its store before giving up.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
+from importlib import import_module
 
+from django.conf import settings as django_settings
 from django.contrib.auth import logout
 from django.http import HttpRequest, HttpResponse
 
@@ -37,6 +49,8 @@ from .client import KeycloakClient, TokenExchangeError
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
 from .views import SESSION_ACCESS_EXPIRES_KEY, SESSION_REFRESH_TOKEN_KEY
+
+_logger = logging.getLogger(__name__)
 
 
 class KeycloakSessionRefreshMiddleware:
@@ -59,8 +73,8 @@ class KeycloakSessionRefreshMiddleware:
         client = KeycloakClient(settings)
         try:
             tokens = client.refresh(refresh_token=refresh_token)
-        except TokenExchangeError:
-            logout(request)
+        except TokenExchangeError as exc:
+            self._handle_refresh_failure(request, exc)
             return
 
         access_token = tokens.get("access_token")
@@ -83,14 +97,55 @@ class KeycloakSessionRefreshMiddleware:
         except AuthorizationError:
             logout(request)
             return
+        except ValueError:
+            _logger.exception("PYOBS_AUTH['REQUIRED_ROLES'] is malformed")
+            raise
 
         # Re-run the resolver so a claim-derived local flag (e.g. portal's `is_superuser` synced
         # from a client role) picks up a change made in Keycloak since login, not just at next
-        # login.
+        # login - and so the *current* request sees it too, not only the next one.
         user_resolver = settings.resolve_user_callable()
-        user_resolver(claims)
+        refreshed_user = user_resolver(claims)
+        if refreshed_user is None:
+            logout(request)
+            return
+        request.user = refreshed_user
 
         request.session[SESSION_ACCESS_EXPIRES_KEY] = claims["exp"]
         new_refresh_token = tokens.get("refresh_token")
         if new_refresh_token:
             request.session[SESSION_REFRESH_TOKEN_KEY] = new_refresh_token
+
+    def _handle_refresh_failure(self, request: HttpRequest, exc: TokenExchangeError) -> None:
+        if exc.error_code != "invalid_grant":
+            # Keycloak unreachable, a 5xx, a malformed response, etc. - not evidence of
+            # revocation. Leave the session as-is; the next request retries. No backoff/
+            # rate-limiting here - retrying every request during an outage is an accepted
+            # tradeoff at this fleet's scale.
+            _logger.warning("Keycloak refresh_token grant failed (not invalid_grant): %s", exc)
+            return
+
+        # invalid_grant can mean a genuinely revoked/expired grant, or a benign race: two
+        # concurrent requests both saw the access token as expired and both tried to refresh the
+        # same refresh token - if the realm rotates/revokes refresh tokens on use, only the first
+        # succeeds and the second gets invalid_grant even though nothing was actually revoked.
+        # Re-read the session fresh from its store (not the in-memory request.session, which may
+        # be stale relative to what the concurrent request already wrote) before giving up.
+        fresh = self._fresh_session(request)
+        fresh_expires_at = fresh.get(SESSION_ACCESS_EXPIRES_KEY) if fresh is not None else None
+        if fresh_expires_at is not None and fresh_expires_at > time.time():
+            request.session[SESSION_ACCESS_EXPIRES_KEY] = fresh_expires_at
+            fresh_refresh_token = fresh.get(SESSION_REFRESH_TOKEN_KEY)
+            if fresh_refresh_token is not None:
+                request.session[SESSION_REFRESH_TOKEN_KEY] = fresh_refresh_token
+            return
+
+        logout(request)
+
+    @staticmethod
+    def _fresh_session(request: HttpRequest):
+        session_key = request.session.session_key
+        if not session_key:
+            return None
+        engine = import_module(django_settings.SESSION_ENGINE)
+        return engine.SessionStore(session_key=session_key)

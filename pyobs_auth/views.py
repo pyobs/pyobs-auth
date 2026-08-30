@@ -7,6 +7,8 @@ plain Django views instead; wire them in via pyobs_auth.urls.
 
 from __future__ import annotations
 
+import logging
+
 from django.conf import settings as django_settings
 from django.contrib.auth import login, logout
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
@@ -17,6 +19,8 @@ from .authorization import AuthorizationError, authorize
 from .client import KeycloakClient, TokenExchangeError
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
+
+_logger = logging.getLogger(__name__)
 
 SESSION_STATE_KEY = "pyobs_auth_state"
 SESSION_CODE_VERIFIER_KEY = "pyobs_auth_code_verifier"
@@ -91,16 +95,22 @@ class CallbackView(View):
         except TokenValidationError as exc:
             return _error_response(request, f"Received an invalid token: {exc}")
 
+        # Checked before resolving a local user - an unauthorized caller must not mint a User
+        # row just by presenting a validly-signed-but-ungrouped token.
+        try:
+            authorize(claims, settings)
+        except AuthorizationError:
+            return _error_response(request, "You are not authorized to use this service. Contact an administrator.")
+        except ValueError:
+            _logger.exception("PYOBS_AUTH['REQUIRED_ROLES'] is malformed")
+            raise
+
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
             return _error_response(request, "No local user for this token")
         if settings.enforce_local_active and not user.is_active:
             return _error_response(request, "This account is pending activation. Contact an administrator.")
-        try:
-            authorize(claims, settings)
-        except AuthorizationError:
-            return _error_response(request, "You are not authorized to use this service. Contact an administrator.")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
         login(request, user, backend=backend)
@@ -114,8 +124,23 @@ class CallbackView(View):
         # see pyobs-core's shared-authz-keycloak.md "Revocation model and freshness".
         refresh_token = tokens.get("refresh_token")
         if refresh_token:
-            request.session[SESSION_REFRESH_TOKEN_KEY] = refresh_token
-            request.session[SESSION_ACCESS_EXPIRES_KEY] = claims["exp"]
+            session_engine = getattr(django_settings, "SESSION_ENGINE", "django.contrib.sessions.backends.db")
+            if session_engine.endswith(".signed_cookies"):
+                # A cookie-backed session serializes into the browser - signed, but not
+                # encrypted, so storing a bearer credential that can mint fresh access tokens
+                # indefinitely there would hand it to the client. Skip storing it; the session
+                # simply won't be refreshable (KeycloakSessionRefreshMiddleware is a no-op for
+                # it), same as before this feature existed.
+                _logger.warning(
+                    "SESSION_ENGINE=%s is cookie-backed - not storing the Keycloak refresh token "
+                    "in the session. KeycloakSessionRefreshMiddleware will be a no-op for this "
+                    "session; group/role revocation only takes effect at next login. Switch to a "
+                    "server-side SESSION_ENGINE (db/cached_db) to enable session refresh.",
+                    session_engine,
+                )
+            else:
+                request.session[SESSION_REFRESH_TOKEN_KEY] = refresh_token
+                request.session[SESSION_ACCESS_EXPIRES_KEY] = claims["exp"]
 
         return HttpResponseRedirect(next_url)
 

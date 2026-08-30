@@ -110,6 +110,36 @@ def test_authenticate_passes_when_required_group_present(signing_keys, make_clai
 
 @responses.activate
 @pytest.mark.django_db
+def test_authenticate_does_not_mint_a_user_when_required_group_missing(signing_keys, make_claims, monkeypatch):
+    """authorize() must run before USER_RESOLVER - an unauthorized caller shouldn't get a local
+    User row minted just by presenting a validly-signed-but-ungrouped token."""
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="never-minted-sub", groups=[]))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with override_settings(PYOBS_AUTH={**django_settings.PYOBS_AUTH, "REQUIRED_GROUPS": ["/pyobs-archive"]}):
+        with pytest.raises(AuthenticationFailed):
+            KeycloakAuthentication().authenticate(request)
+
+    assert not User.objects.filter(username="never-minted-sub").exists()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_authenticate_propagates_malformed_required_roles_loudly(signing_keys, make_claims, monkeypatch):
+    """A malformed REQUIRED_ROLES entry is a deployment config error, not user input - it must
+    surface loudly (ValueError, ultimately a 500), not be swallowed into a quiet refusal."""
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="whatever"))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with override_settings(PYOBS_AUTH={**django_settings.PYOBS_AUTH, "REQUIRED_ROLES": ["no-colon-here"]}):
+        with pytest.raises(ValueError, match="malformed"):
+            KeycloakAuthentication().authenticate(request)
+
+
+@responses.activate
+@pytest.mark.django_db
 def test_authenticate_raises_on_invalid_token(signing_keys, make_claims, monkeypatch):
     from .helpers import generate_signing_keys
 

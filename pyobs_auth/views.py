@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.views import View
 
+from .authorization import AuthorizationError, authorize
 from .client import KeycloakClient, TokenExchangeError
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
@@ -23,6 +24,10 @@ SESSION_NEXT_KEY = "pyobs_auth_next"
 # Presence of this key is also how LogoutView tells "this session came from Keycloak" apart from
 # a plain local-password session, so it knows whether to also end the Keycloak SSO session.
 SESSION_ID_TOKEN_KEY = "pyobs_auth_id_token"
+# Both read by KeycloakSessionRefreshMiddleware - absence of either means this session predates
+# the middleware or wasn't established via Keycloak, so it leaves the session alone.
+SESSION_REFRESH_TOKEN_KEY = "pyobs_auth_refresh_token"
+SESSION_ACCESS_EXPIRES_KEY = "pyobs_auth_access_expires"
 
 
 def _error_response(request: HttpRequest, message: str) -> HttpResponse:
@@ -90,8 +95,12 @@ class CallbackView(View):
         user = user_resolver(claims)
         if user is None:
             return _error_response(request, "No local user for this token")
-        if not user.is_active:
+        if settings.enforce_local_active and not user.is_active:
             return _error_response(request, "This account is pending activation. Contact an administrator.")
+        try:
+            authorize(claims, settings)
+        except AuthorizationError:
+            return _error_response(request, "You are not authorized to use this service. Contact an administrator.")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
         login(request, user, backend=backend)
@@ -100,6 +109,13 @@ class CallbackView(View):
         id_token = tokens.get("id_token")
         if id_token:
             request.session[SESSION_ID_TOKEN_KEY] = id_token
+        # Kept so KeycloakSessionRefreshMiddleware can silently refresh and re-authorize once the
+        # access token expires, instead of a browser session outliving revocation until logout -
+        # see pyobs-core's shared-authz-keycloak.md "Revocation model and freshness".
+        refresh_token = tokens.get("refresh_token")
+        if refresh_token:
+            request.session[SESSION_REFRESH_TOKEN_KEY] = refresh_token
+            request.session[SESSION_ACCESS_EXPIRES_KEY] = claims["exp"]
 
         return HttpResponseRedirect(next_url)
 

@@ -1,6 +1,8 @@
 import pytest
 import responses
+from django.conf import settings as django_settings
 from django.contrib.auth.models import User
+from django.test import override_settings
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIRequestFactory
 
@@ -57,14 +59,53 @@ def test_authenticate_defers_for_a_token_from_another_issuer(signing_keys, make_
 
 @responses.activate
 @pytest.mark.django_db
-def test_authenticate_raises_for_inactive_user(signing_keys, make_claims, monkeypatch):
+def test_authenticate_allows_inactive_user_by_default(signing_keys, make_claims, monkeypatch):
+    """Default behavior: is_active is not the authorization gate any more (claims are, via
+    REQUIRED_GROUPS/REQUIRED_ROLES) - ENFORCE_LOCAL_ACTIVE must be set to keep the old gate."""
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     User.objects.create(username="inactive-sub", is_active=False)
     token = signing_keys.sign(make_claims(sub="inactive-sub"))
     request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
 
-    with pytest.raises(AuthenticationFailed):
-        KeycloakAuthentication().authenticate(request)
+    user, claims = KeycloakAuthentication().authenticate(request)
+    assert user.username == "inactive-sub"
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_authenticate_raises_for_inactive_user_with_enforce_local_active(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    User.objects.create(username="inactive-sub", is_active=False)
+    token = signing_keys.sign(make_claims(sub="inactive-sub"))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with override_settings(PYOBS_AUTH={**django_settings.PYOBS_AUTH, "ENFORCE_LOCAL_ACTIVE": True}):
+        with pytest.raises(AuthenticationFailed):
+            KeycloakAuthentication().authenticate(request)
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_authenticate_raises_when_required_group_missing(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="archive-sub", groups=["/some-other-group"]))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with override_settings(PYOBS_AUTH={**django_settings.PYOBS_AUTH, "REQUIRED_GROUPS": ["/pyobs-archive"]}):
+        with pytest.raises(AuthenticationFailed):
+            KeycloakAuthentication().authenticate(request)
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_authenticate_passes_when_required_group_present(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="archive-sub", groups=["/pyobs-archive"]))
+    request = factory.get("/", HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    with override_settings(PYOBS_AUTH={**django_settings.PYOBS_AUTH, "REQUIRED_GROUPS": ["/pyobs-archive"]}):
+        user, claims = KeycloakAuthentication().authenticate(request)
+    assert user.username == "archive-sub"
 
 
 @responses.activate

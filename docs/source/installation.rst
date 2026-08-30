@@ -18,6 +18,18 @@ Add to ``INSTALLED_APPS`` and wire the login/callback/logout views into your URL
         ...
     ]
 
+Also add ``KeycloakSessionRefreshMiddleware`` to ``MIDDLEWARE``, after ``AuthenticationMiddleware``,
+so a browser session's authorization is re-checked once its access token expires rather than only
+at the user's next login (see :ref:`authorization` in :doc:`configuration`)::
+
+    MIDDLEWARE = [
+        ...,
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "pyobs_auth.middleware.KeycloakSessionRefreshMiddleware",
+        ...,
+    ]
+
 Then configure the ``PYOBS_AUTH`` setting (see :doc:`configuration`) and point your existing
 "Log out" link/form at ``pyobs_auth:logout`` instead of Django's built-in ``logout`` view — it's
 POST-only (matching Django's own CSRF-safe logout convention) and handles both a Keycloak-backed

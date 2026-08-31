@@ -11,13 +11,22 @@ from typing import Any
 from urllib.parse import urlencode
 
 import requests
+from requests.exceptions import RequestException
 
 from .discovery import fetch_discovery_document
 from .settings import KeycloakSettings
 
 
 class TokenExchangeError(Exception):
-    pass
+    """`error_code` is the OAuth `error` field from the token endpoint's JSON body, when the
+    endpoint responded at all (e.g. "invalid_grant" for a revoked/expired/reused refresh token).
+    None for a connection-level failure or a non-JSON/unrecognized response - callers that need to
+    tell "genuinely revoked" apart from "couldn't even ask" should check this rather than assume
+    every TokenExchangeError means the former."""
+
+    def __init__(self, message: str, *, error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def _b64url(raw: bytes) -> str:
@@ -137,7 +146,20 @@ class KeycloakClient:
         return f"{document.end_session_endpoint}?{urlencode(params)}"
 
     def _post_token(self, token_endpoint: str, data: dict[str, str]) -> dict[str, Any]:
-        response = self._session.post(token_endpoint, data=data, timeout=10.0)
+        try:
+            response = self._session.post(token_endpoint, data=data, timeout=10.0)
+        except RequestException as exc:
+            raise TokenExchangeError(f"could not reach token endpoint: {exc}") from exc
+
         if response.status_code != 200:
-            raise TokenExchangeError(f"token endpoint returned {response.status_code}: {response.text}")
+            error_code = None
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            if isinstance(body, dict):
+                error_code = body.get("error")
+            raise TokenExchangeError(
+                f"token endpoint returned {response.status_code}: {response.text}", error_code=error_code
+            )
         return response.json()

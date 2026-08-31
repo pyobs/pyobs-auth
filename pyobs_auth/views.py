@@ -7,15 +7,20 @@ plain Django views instead; wire them in via pyobs_auth.urls.
 
 from __future__ import annotations
 
+import logging
+
 from django.conf import settings as django_settings
 from django.contrib.auth import login, logout
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.views import View
 
+from .authorization import AuthorizationError, authorize
 from .client import KeycloakClient, TokenExchangeError
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
+
+_logger = logging.getLogger(__name__)
 
 SESSION_STATE_KEY = "pyobs_auth_state"
 SESSION_CODE_VERIFIER_KEY = "pyobs_auth_code_verifier"
@@ -23,6 +28,10 @@ SESSION_NEXT_KEY = "pyobs_auth_next"
 # Presence of this key is also how LogoutView tells "this session came from Keycloak" apart from
 # a plain local-password session, so it knows whether to also end the Keycloak SSO session.
 SESSION_ID_TOKEN_KEY = "pyobs_auth_id_token"
+# Both read by KeycloakSessionRefreshMiddleware - absence of either means this session predates
+# the middleware or wasn't established via Keycloak, so it leaves the session alone.
+SESSION_REFRESH_TOKEN_KEY = "pyobs_auth_refresh_token"
+SESSION_ACCESS_EXPIRES_KEY = "pyobs_auth_access_expires"
 
 
 def _error_response(request: HttpRequest, message: str) -> HttpResponse:
@@ -86,11 +95,21 @@ class CallbackView(View):
         except TokenValidationError as exc:
             return _error_response(request, f"Received an invalid token: {exc}")
 
+        # Checked before resolving a local user - an unauthorized caller must not mint a User
+        # row just by presenting a validly-signed-but-ungrouped token.
+        try:
+            authorize(claims, settings)
+        except AuthorizationError:
+            return _error_response(request, "You are not authorized to use this service. Contact an administrator.")
+        except ValueError:
+            _logger.exception("PYOBS_AUTH['REQUIRED_ROLES'] is malformed")
+            raise
+
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
             return _error_response(request, "No local user for this token")
-        if not user.is_active:
+        if settings.enforce_local_active and not user.is_active:
             return _error_response(request, "This account is pending activation. Contact an administrator.")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
@@ -100,6 +119,28 @@ class CallbackView(View):
         id_token = tokens.get("id_token")
         if id_token:
             request.session[SESSION_ID_TOKEN_KEY] = id_token
+        # Kept so KeycloakSessionRefreshMiddleware can silently refresh and re-authorize once the
+        # access token expires, instead of a browser session outliving revocation until logout -
+        # see pyobs-core's shared-authz-keycloak.md "Revocation model and freshness".
+        refresh_token = tokens.get("refresh_token")
+        if refresh_token:
+            session_engine = getattr(django_settings, "SESSION_ENGINE", "django.contrib.sessions.backends.db")
+            if session_engine.endswith(".signed_cookies"):
+                # A cookie-backed session serializes into the browser - signed, but not
+                # encrypted, so storing a bearer credential that can mint fresh access tokens
+                # indefinitely there would hand it to the client. Skip storing it; the session
+                # simply won't be refreshable (KeycloakSessionRefreshMiddleware is a no-op for
+                # it), same as before this feature existed.
+                _logger.warning(
+                    "SESSION_ENGINE=%s is cookie-backed - not storing the Keycloak refresh token "
+                    "in the session. KeycloakSessionRefreshMiddleware will be a no-op for this "
+                    "session; group/role revocation only takes effect at next login. Switch to a "
+                    "server-side SESSION_ENGINE (db/cached_db) to enable session refresh.",
+                    session_engine,
+                )
+            else:
+                request.session[SESSION_REFRESH_TOKEN_KEY] = refresh_token
+                request.session[SESSION_ACCESS_EXPIRES_KEY] = claims["exp"]
 
         return HttpResponseRedirect(next_url)
 

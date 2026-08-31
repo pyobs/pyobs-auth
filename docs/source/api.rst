@@ -28,6 +28,18 @@ KeycloakAuthentication
    :members:
    :show-inheritance:
 
+``authorize()``
+****************
+.. autofunction:: pyobs_auth.authorization.authorize
+
+.. autoclass:: pyobs_auth.authorization.AuthorizationError
+
+KeycloakSessionRefreshMiddleware
+*********************************
+.. autoclass:: pyobs_auth.middleware.KeycloakSessionRefreshMiddleware
+   :members:
+   :show-inheritance:
+
 Views
 *****
 .. autoclass:: pyobs_auth.views.LoginView

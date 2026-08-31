@@ -26,11 +26,22 @@ The pieces
   the validator into ``REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES']``, additive alongside a
   service's existing authentication classes (e.g. DRF ``TokenAuthentication`` for
   service-to-service calls).
+- ``pyobs_auth.authorization.authorize`` — the claims-based authorization decision
+  (``REQUIRED_GROUPS``/``REQUIRED_ROLES``), called from both ``KeycloakAuthentication`` and
+  ``CallbackView`` before either resolves a local user, so an unauthorized caller never mints a
+  ``User`` row. Raises ``AuthorizationError`` rather than returning a bool. See
+  :doc:`configuration`.
 - ``pyobs_auth.views``/``pyobs_auth.urls`` — the browser-facing login redirect + callback views
   for the PKCE flow (session-based), plus ``LogoutView``, which ends the Keycloak SSO session via
   RP-Initiated Logout only for sessions that actually came from Keycloak — a plain local-password
   session gets an ordinary local logout, so the host app's one "Log out" link/URL works correctly
   either way without knowing how the user signed in.
+- ``pyobs_auth.middleware.KeycloakSessionRefreshMiddleware`` — keeps a browser session's
+  authorization decision fresh between logins: silently refreshes the access token once it
+  expires and re-runs ``authorize()``, tolerating a Keycloak outage (only ``invalid_grant``
+  ends the session) and a benign refresh-token-rotation race between concurrent requests. Requires
+  a server-side ``SESSION_ENGINE`` — ``CallbackView`` refuses to store the refresh token in a
+  cookie-backed session. See :doc:`installation`.
 
 See :doc:`api` for the full class reference.
 

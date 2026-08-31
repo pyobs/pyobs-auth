@@ -25,6 +25,7 @@ TEMPLATES = [
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "pyobs_auth.middleware.KeycloakSessionRefreshMiddleware",
 ]
 
 ROOT_URLCONF = "tests.urls"

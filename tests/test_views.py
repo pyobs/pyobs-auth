@@ -60,7 +60,9 @@ def test_full_login_flow(signing_keys, make_claims, monkeypatch):
 
 @responses.activate
 @pytest.mark.django_db
-def test_callback_rejects_inactive_user(signing_keys, make_claims, monkeypatch):
+def test_callback_allows_inactive_user_by_default(signing_keys, make_claims, monkeypatch):
+    """ENFORCE_LOCAL_ACTIVE defaults to False - see test_authentication's equivalent for the
+    DRF/bearer-token path."""
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     User.objects.create(username="inactive-sub", is_active=False)
     token = signing_keys.sign(make_claims(sub="inactive-sub"))
@@ -72,11 +74,84 @@ def test_callback_rejects_inactive_user(signing_keys, make_claims, monkeypatch):
 
     response = client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
 
+    assert response.status_code == 302
+    assert client.session["_auth_user_id"] == str(User.objects.get(username="inactive-sub").pk)
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_rejects_inactive_user_with_enforce_local_active(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    User.objects.create(username="inactive-sub", is_active=False)
+    token = signing_keys.sign(make_claims(sub="inactive-sub"))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "ENFORCE_LOCAL_ACTIVE": True}):
+        login_response = client.get("/accounts/keycloak/login/")
+        state = parse_qs(urlparse(login_response.url).query)["state"][0]
+
+        response = client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
     assert response.status_code == 400
     assert "_auth_user_id" not in client.session
     # a styled error page, not a bare-text 400 - see pyobs_auth/templates/pyobs_auth/error.html
     assert b"pending activation" in response.content
     assert b'href="/"' in response.content
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_rejects_when_required_group_missing(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="some-sub", groups=["/something-else"]))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    with override_settings(PYOBS_AUTH={**settings.PYOBS_AUTH, "REQUIRED_GROUPS": ["/pyobs-archive"]}):
+        login_response = client.get("/accounts/keycloak/login/")
+        state = parse_qs(urlparse(login_response.url).query)["state"][0]
+
+        response = client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    assert response.status_code == 400
+    assert "_auth_user_id" not in client.session
+    assert b"not authorized" in response.content
+    # unauthorized - no local user should have been minted
+    assert not User.objects.filter(username="some-sub").exists()
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_stores_refresh_token_and_access_token_exp(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    claims = make_claims(sub="keycloak-sub-99")
+    token = signing_keys.sign(claims)
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token, "refresh_token": "the-refresh-token"})
+
+    client = Client()
+    login_response = client.get("/accounts/keycloak/login/")
+    state = parse_qs(urlparse(login_response.url).query)["state"][0]
+    client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    assert client.session["pyobs_auth_refresh_token"] == "the-refresh-token"
+    assert client.session["pyobs_auth_access_token_exp"] == claims["exp"]
+
+
+@responses.activate
+@pytest.mark.django_db
+def test_callback_without_refresh_token_stores_no_refresh_session_keys(signing_keys, make_claims, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    token = signing_keys.sign(make_claims(sub="keycloak-sub-100"))
+    responses.post(TOKEN_ENDPOINT, json={"access_token": token})
+
+    client = Client()
+    login_response = client.get("/accounts/keycloak/login/")
+    state = parse_qs(urlparse(login_response.url).query)["state"][0]
+    client.get(f"/accounts/keycloak/callback/?code=the-code&state={state}")
+
+    assert "pyobs_auth_refresh_token" not in client.session
+    assert "pyobs_auth_access_token_exp" not in client.session
 
 
 @responses.activate

@@ -28,5 +28,24 @@ kind it is::
         <button type="submit">Log out</button>
     </form>
 
+If using the browser login flow, also add ``KeycloakSessionRefreshMiddleware`` to
+``MIDDLEWARE``, after Django's session and auth middleware (it needs both ``request.session`` and
+``django.contrib.auth.logout()``)::
+
+    MIDDLEWARE = [
+        ...,
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "pyobs_auth.middleware.KeycloakSessionRefreshMiddleware",
+        ...,
+    ]
+
+This is what bounds revocation (a group/role change in Keycloak) to roughly one access-token
+lifetime instead of ``SESSION_COOKIE_AGE`` — see :ref:`authorization` in :doc:`configuration`.
+It's a
+no-op for any session that didn't come through the browser login flow (e.g. local-password
+Django-admin sessions), so it's safe to add even before configuring
+``REQUIRED_GROUPS``/``REQUIRED_ROLES``.
+
 See :doc:`api` for using ``KeycloakClient``/``TokenValidator`` directly outside the Django
 integration (e.g. service-to-service calls).

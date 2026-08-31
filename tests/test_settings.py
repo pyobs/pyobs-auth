@@ -12,6 +12,22 @@ def test_get_settings_reads_django_setting():
     assert settings.issuer == "https://keycloak.example.org/realms/pyobs"
     assert settings.discovery_url == "https://keycloak.example.org/realms/pyobs/.well-known/openid-configuration"
     assert settings.expected_audience == "archive"
+    assert settings.required_groups == ()
+    assert settings.required_roles == ()
+    assert settings.enforce_local_active is False
+
+
+def test_get_settings_reads_authorization_keys(settings):
+    settings.PYOBS_AUTH = {
+        **settings.PYOBS_AUTH,
+        "REQUIRED_GROUPS": ["/pyobs-archive"],
+        "REQUIRED_ROLES": ["client:archive:archive-admin"],
+        "ENFORCE_LOCAL_ACTIVE": True,
+    }
+    parsed = get_settings()
+    assert parsed.required_groups == ("/pyobs-archive",)
+    assert parsed.required_roles == ("client:archive:archive-admin",)
+    assert parsed.enforce_local_active is True
 
 
 def test_missing_required_key_raises(settings):

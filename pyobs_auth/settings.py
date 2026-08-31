@@ -11,6 +11,11 @@ Read from the Django ``PYOBS_AUTH`` setting, e.g.::
         "POST_LOGOUT_REDIRECT_URI": "https://archive.example.org/",
         # dotted path to a callable(claims: dict) -> django.contrib.auth.models.User
         "USER_RESOLVER": "pyobs_archive.authentication.keycloak.resolve_user",
+        # optional: gate on Keycloak group/role claims instead of (or in addition to) local
+        # is_active - see authorization.py
+        "REQUIRED_GROUPS": ["/pyobs-archive"],
+        "REQUIRED_ROLES": ["client:archive:archive-admin"],
+        "ENFORCE_LOCAL_ACTIVE": False,
     }
 """
 
@@ -34,6 +39,9 @@ class KeycloakSettings:
     scopes: tuple[str, ...] = field(default_factory=lambda: ("openid", "profile", "email"))
     user_resolver: str | None = None
     idp_hint: str | None = None
+    required_groups: tuple[str, ...] = ()
+    required_roles: tuple[str, ...] = ()
+    enforce_local_active: bool = False
 
     @property
     def issuer(self) -> str:
@@ -87,4 +95,7 @@ def get_settings() -> KeycloakSettings:
         scopes=tuple(raw.get("SCOPES", ("openid", "profile", "email"))),
         user_resolver=raw.get("USER_RESOLVER"),
         idp_hint=raw.get("IDP_HINT"),
+        required_groups=tuple(raw.get("REQUIRED_GROUPS", ())),
+        required_roles=tuple(raw.get("REQUIRED_ROLES", ())),
+        enforce_local_active=bool(raw.get("ENFORCE_LOCAL_ACTIVE", False)),
     )

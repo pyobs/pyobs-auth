@@ -9,16 +9,17 @@ issuer.
 This class is written to be safe to stack alongside another Bearer-scheme authenticator that
 can't be modified (e.g. an existing legacy OAuth2 BearerAuthentication) - see below.
 
-A resolved user with `is_active=False` is refused - USER_RESOLVER implementations mint new
-accounts inactive by convention, giving each service an independent local activation gate on top
-of whatever access control Keycloak itself does (a kill switch that doesn't depend on Keycloak
-realm/client config alone).
+Authorization (may this token's user use this service at all) is decided by claims alone, before
+any local User is resolved - see authorization.py. The local `is_active` flag is a separate,
+opt-in kill switch (PYOBS_AUTH["ENFORCE_LOCAL_ACTIVE"], default False) for deployments that want a
+Keycloak-independent local override on top of the claims gate; it is not the default path.
 """
 
 from __future__ import annotations
 
 from rest_framework import authentication, exceptions
 
+from .authorization import authorize
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
 
@@ -51,11 +52,16 @@ class KeycloakAuthentication(authentication.BaseAuthentication):
         except TokenValidationError as exc:
             raise exceptions.AuthenticationFailed(str(exc)) from exc
 
+        # Claims-only check, before resolving/minting a local User - someone who isn't authorized
+        # at all shouldn't cause a local account to be created.
+        if not authorize(claims, settings):
+            raise exceptions.AuthenticationFailed("not authorized")
+
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
             raise exceptions.AuthenticationFailed("No local user for this token")
-        if not user.is_active:
+        if settings.enforce_local_active and not user.is_active:
             raise exceptions.AuthenticationFailed("Account pending activation")
 
         return (user, claims)

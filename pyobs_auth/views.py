@@ -13,6 +13,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.views import View
 
+from .authorization import authorize
 from .client import KeycloakClient, TokenExchangeError
 from .settings import get_settings
 from .validation import TokenValidationError, TokenValidator
@@ -21,8 +22,18 @@ SESSION_STATE_KEY = "pyobs_auth_state"
 SESSION_CODE_VERIFIER_KEY = "pyobs_auth_code_verifier"
 SESSION_NEXT_KEY = "pyobs_auth_next"
 # Presence of this key is also how LogoutView tells "this session came from Keycloak" apart from
-# a plain local-password session, so it knows whether to also end the Keycloak SSO session.
+# a plain local-password session, so it knows whether to also end the Keycloak SSO session. It's
+# also, alongside the two keys below, how KeycloakSessionRefreshMiddleware tells a Keycloak-SSO
+# session apart from a locally-authenticated one.
 SESSION_ID_TOKEN_KEY = "pyobs_auth_id_token"
+# Needed to silently refresh the access token once it expires (KeycloakSessionRefreshMiddleware) -
+# without this, a browser session never re-contacts Keycloak after login and a revoked
+# group/role only takes effect at SESSION_COOKIE_AGE, not at token expiry.
+SESSION_REFRESH_TOKEN_KEY = "pyobs_auth_refresh_token"
+# The access token itself isn't kept (it's never sent anywhere for a session-cookie-authenticated
+# request) - just its `exp`, so the middleware knows when a refresh is due without re-decoding
+# anything.
+SESSION_ACCESS_TOKEN_EXP_KEY = "pyobs_auth_access_token_exp"
 
 
 def _error_response(request: HttpRequest, message: str) -> HttpResponse:
@@ -86,11 +97,16 @@ class CallbackView(View):
         except TokenValidationError as exc:
             return _error_response(request, f"Received an invalid token: {exc}")
 
+        # Claims-only check, before resolving/minting a local User - same ordering and rationale
+        # as KeycloakAuthentication.
+        if not authorize(claims, settings):
+            return _error_response(request, "not authorized")
+
         user_resolver = settings.resolve_user_callable()
         user = user_resolver(claims)
         if user is None:
             return _error_response(request, "No local user for this token")
-        if not user.is_active:
+        if settings.enforce_local_active and not user.is_active:
             return _error_response(request, "This account is pending activation. Contact an administrator.")
 
         backend = getattr(django_settings, "PYOBS_AUTH_LOGIN_BACKEND", "django.contrib.auth.backends.ModelBackend")
@@ -100,6 +116,12 @@ class CallbackView(View):
         id_token = tokens.get("id_token")
         if id_token:
             request.session[SESSION_ID_TOKEN_KEY] = id_token
+        # Both set together, only when a refresh_token came back - without one there's nothing
+        # for KeycloakSessionRefreshMiddleware to refresh with, so an exp alone would be useless.
+        refresh_token = tokens.get("refresh_token")
+        if refresh_token:
+            request.session[SESSION_REFRESH_TOKEN_KEY] = refresh_token
+            request.session[SESSION_ACCESS_TOKEN_EXP_KEY] = claims["exp"]
 
         return HttpResponseRedirect(next_url)
 

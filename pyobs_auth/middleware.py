@@ -121,8 +121,9 @@ class KeycloakSessionRefreshMiddleware:
             # Keycloak unreachable, a 5xx, a malformed response, etc. - not evidence of
             # revocation. Leave the session as-is; the next request retries. No backoff/
             # rate-limiting here - retrying every request during an outage is an accepted
-            # tradeoff at this fleet's scale.
-            _logger.warning("Keycloak refresh_token grant failed (not invalid_grant): %s", exc)
+            # tradeoff at this fleet's scale. debug, not warning: during an outage this fires
+            # once per expired session per request, which would otherwise flood logs.
+            _logger.debug("Keycloak refresh_token grant failed (not invalid_grant): %s", exc)
             return
 
         # invalid_grant can mean a genuinely revoked/expired grant, or a benign race: two

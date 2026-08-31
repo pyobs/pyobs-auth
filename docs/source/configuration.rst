@@ -15,7 +15,10 @@ for DRF::
         "IDP_HINT": "gwdg",
         "REQUIRED_GROUPS": ["/myapp"],
         "REQUIRED_ROLES": ["client:myapp:myapp-admin"],
-        "ENFORCE_LOCAL_ACTIVE": False,
+        # Recommended: True, to preserve pre-2.1 behavior (is_active was always the gate) as a
+        # Keycloak-independent kill switch on top of the claims gate above. Leave unset/False
+        # only if you deliberately want is_active to stop mattering for authorization.
+        "ENFORCE_LOCAL_ACTIVE": True,
     }
 
     REST_FRAMEWORK = {
@@ -76,10 +79,12 @@ for DRF::
     ``realm_access.roles``) or ``"client:<client_id>:<role>"`` (checked against
     ``resource_access.<client_id>.roles``). See :ref:`authorization` below.
 
-``ENFORCE_LOCAL_ACTIVE`` (default: ``False``)
+``ENFORCE_LOCAL_ACTIVE`` (default: ``False``; recommended: ``True``)
     Whether the local ``User.is_active`` flag also gates login/API access, on top of whatever
-    ``REQUIRED_GROUPS``/``REQUIRED_ROLES`` decide. See :ref:`authorization` below — **this is a
-    behavior change from earlier pyobs-auth versions.**
+    ``REQUIRED_GROUPS``/``REQUIRED_ROLES`` decide. Defaults to ``False`` for backward
+    compatibility with a bare config-key bump, but every example in this doc sets it ``True`` —
+    set it explicitly either way rather than relying on the default. See :ref:`authorization`
+    below — **this is a behavior change from earlier pyobs-auth versions.**
 
 .. _authorization:
 

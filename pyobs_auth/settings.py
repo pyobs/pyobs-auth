@@ -11,6 +11,10 @@ Read from the Django ``PYOBS_AUTH`` setting, e.g.::
         "POST_LOGOUT_REDIRECT_URI": "https://archive.example.org/",
         # dotted path to a callable(claims: dict) -> django.contrib.auth.models.User
         "USER_RESOLVER": "pyobs_archive.authentication.keycloak.resolve_user",
+        # optional claims-based authorization gate - see pyobs_auth.authorization
+        "REQUIRED_GROUPS": ["/pyobs-archive"],
+        "REQUIRED_ROLES": ["client:archive:archive-admin"],
+        "ENFORCE_LOCAL_ACTIVE": False,
     }
 """
 
@@ -34,6 +38,9 @@ class KeycloakSettings:
     scopes: tuple[str, ...] = field(default_factory=lambda: ("openid", "profile", "email"))
     user_resolver: str | None = None
     idp_hint: str | None = None
+    required_groups: tuple[str, ...] = field(default_factory=tuple)
+    required_roles: tuple[str, ...] = field(default_factory=tuple)
+    enforce_local_active: bool = False
 
     @property
     def issuer(self) -> str:
@@ -64,6 +71,25 @@ class ImproperlyConfiguredError(Exception):
     pass
 
 
+def _as_tuple(value: Any) -> tuple[str, ...]:
+    """A bare string (a common mistake for a "one group" REQUIRED_GROUPS/REQUIRED_ROLES value)
+    would otherwise silently `tuple()`-split into individual characters instead of raising -
+    normalize it to a one-element tuple instead."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value)
+
+
+def _as_bool(value: Any) -> bool:
+    """`bool("False")` is True - a string value (e.g. from naive env-var parsing) needs an
+    explicit check rather than Python's default truthiness."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 def get_settings() -> KeycloakSettings:
     """Build KeycloakSettings from Django's PYOBS_AUTH setting."""
     from django.conf import settings as django_settings
@@ -87,4 +113,7 @@ def get_settings() -> KeycloakSettings:
         scopes=tuple(raw.get("SCOPES", ("openid", "profile", "email"))),
         user_resolver=raw.get("USER_RESOLVER"),
         idp_hint=raw.get("IDP_HINT"),
+        required_groups=_as_tuple(raw.get("REQUIRED_GROUPS")),
+        required_roles=_as_tuple(raw.get("REQUIRED_ROLES")),
+        enforce_local_active=_as_bool(raw.get("ENFORCE_LOCAL_ACTIVE", False)),
     )

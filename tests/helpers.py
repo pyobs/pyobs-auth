@@ -24,6 +24,15 @@ def resolve_user(claims: dict) -> User:
     return user
 
 
+def resolve_user_or_reject(claims: dict) -> User | None:
+    """Test USER_RESOLVER variant: returns None (e.g. a resolver-side rejection unrelated to the
+    claims gate, such as a disallowed email domain) when the claims carry `email ==
+    "reject@example.org"`, otherwise behaves like `resolve_user` above."""
+    if claims.get("email") == "reject@example.org":
+        return None
+    return resolve_user(claims)
+
+
 @dataclass
 class SigningKeys:
     private_key: rsa.RSAPrivateKey

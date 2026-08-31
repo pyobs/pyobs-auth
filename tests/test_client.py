@@ -62,6 +62,42 @@ def test_exchange_code_raises_on_error_response(keycloak_settings, signing_keys,
 
 
 @responses.activate
+def test_post_token_error_exposes_oauth_error_code(keycloak_settings, signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    responses.post(TOKEN_ENDPOINT, status=400, json={"error": "invalid_grant", "error_description": "expired"})
+
+    with pytest.raises(TokenExchangeError) as excinfo:
+        KeycloakClient(keycloak_settings).refresh(refresh_token="old-rt")
+
+    assert excinfo.value.error_code == "invalid_grant"
+
+
+@responses.activate
+def test_post_token_error_with_non_json_body_has_no_error_code(keycloak_settings, signing_keys, monkeypatch):
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    responses.post(TOKEN_ENDPOINT, status=502, body="Bad Gateway")
+
+    with pytest.raises(TokenExchangeError) as excinfo:
+        KeycloakClient(keycloak_settings).refresh(refresh_token="old-rt")
+
+    assert excinfo.value.error_code is None
+
+
+@responses.activate
+def test_post_token_wraps_connection_error(keycloak_settings, signing_keys, monkeypatch):
+    import requests
+
+    register_discovery_and_jwks(responses, signing_keys, monkeypatch)
+    responses.post(TOKEN_ENDPOINT, body=requests.exceptions.ConnectionError("boom"))
+
+    with pytest.raises(TokenExchangeError) as excinfo:
+        KeycloakClient(keycloak_settings).refresh(refresh_token="old-rt")
+
+    assert excinfo.value.error_code is None
+    assert "could not reach token endpoint" in str(excinfo.value)
+
+
+@responses.activate
 def test_client_credentials_token(keycloak_settings, signing_keys, monkeypatch):
     register_discovery_and_jwks(responses, signing_keys, monkeypatch)
     responses.post(TOKEN_ENDPOINT, json={"access_token": "service-token"})

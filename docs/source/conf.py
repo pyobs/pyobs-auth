@@ -70,6 +70,9 @@ nitpick_ignore = [
     ("py:class", "requests.sessions.Session"),
     ("py:class", "rest_framework.authentication.BaseAuthentication"),
     ("py:class", "django.views.generic.base.View"),
+    ("py:class", "django.http.request.HttpRequest"),
+    ("py:class", "django.http.response.HttpResponse"),
+    ("py:class", "collections.abc.Callable"),
     # autodoc mis-renders KeycloakSettings.scopes' `tuple[str, ...]` annotation as a broken xref
     ("py:class", "'tuple[str"),
 ]
